@@ -1,0 +1,702 @@
+// Schema del database — Gestionale Allevamento
+//
+// SVILUPPO LOCALE: provider "sqlite" (nessuna installazione necessaria).
+// PRODUZIONE (Supabase): cambia provider in "postgresql" e imposta DATABASE_URL
+//   (vedi .env.example). Lo schema è pensato per essere compatibile con entrambi
+//   (nessun enum nativo: gli stati sono stringhe validate nel codice con zod).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+  // Per Supabase/Postgres aggiungi anche:
+  // directUrl = env("DIRECT_URL")
+}
+
+// --- Utenti / accesso ---
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("OPERATORE") // ADMIN | OPERATORE | VETERINARIO
+  // Sezioni abilitate, separate da virgola: SUINI,AVICOLI,BIOGAS,FOTOVOLTAICO,AGRITURISMO
+  sezioni      String   @default("SUINI")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// --- Lotto / partita (suini a gruppi, avicoli, altro) ---
+model Lot {
+  id           String   @id @default(cuid())
+  code         String   @unique // codice identificativo del lotto
+  species      String // SUINI | AVICOLI | ALTRO
+  name         String? // descrizione libera
+  breed        String? // razza / tipo
+  entryDate    DateTime // data di ingresso/apertura lotto
+  entryType    String   @default("ACQUISTO") // NASCITA | ACQUISTO
+  initialCount Int      @default(0) // capi iniziali
+  currentCount Int      @default(0) // capi attualmente presenti
+  status       String   @default("ATTIVO") // ATTIVO | CHIUSO
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  animals    Animal[]
+  treatments Treatment[]
+  movements  Movement[]
+  feedings   Feeding[]
+}
+
+// --- Capo singolo (soprattutto suini) ---
+model Animal {
+  id        String    @id @default(cuid())
+  tag       String    @unique // marca auricolare / identificativo
+  species   String    @default("SUINI") // SUINI | AVICOLI | ALTRO
+  breed     String?
+  sex       String? // M | F
+  birthDate DateTime?
+  entryDate DateTime  @default(now())
+  weightKg  Float?
+  status    String    @default("PRESENTE") // PRESENTE | VENDUTO | MORTO
+  notes     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  lot   Lot?    @relation(fields: [lotId], references: [id], onDelete: SetNull)
+  lotId String?
+
+  treatments Treatment[]
+  movements  Movement[]
+  feedings   Feeding[]
+}
+
+// --- Trattamento veterinario ---
+model Treatment {
+  id              String    @id @default(cuid())
+  date            DateTime
+  product         String // nome del farmaco
+  activeIngredient String?
+  dosage          String?
+  reason          String? // motivo / patologia
+  withdrawalDays  Int       @default(0) // giorni di sospensione
+  withdrawalUntil DateTime? // data fine sospensione (calcolata)
+  vet             String? // veterinario
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  animal   Animal? @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  animalId String?
+  lot      Lot?    @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  lotId    String?
+}
+
+// --- Movimento (nascite, acquisti, vendite, decessi, trasferimenti) ---
+model Movement {
+  id         String   @id @default(cuid())
+  date       DateTime
+  type       String // NASCITA | ACQUISTO | VENDITA | MORTE | TRASFERIMENTO
+  count      Int      @default(1) // numero di capi coinvolti
+  weightKg   Float?
+  price      Float? // importo (per acquisti/vendite)
+  counterpart String? // cliente / fornitore
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  animal   Animal? @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  animalId String?
+  lot      Lot?    @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  lotId    String?
+}
+
+// --- Alimentazione ---
+model Feeding {
+  id         String   @id @default(cuid())
+  date       DateTime
+  feedType   String // tipo di mangime
+  quantityKg Float    @default(0)
+  cost       Float?
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  animal   Animal? @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  animalId String?
+  lot      Lot?    @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  lotId    String?
+}
+
+// =====================================================================
+// MODULO SUINI (SOCCIDA COMAZOO)
+// Gestione a quantità per box dentro cicli di soccida.
+// =====================================================================
+
+// --- Stalla (capannone) ---
+model Stalla {
+  id        String   @id @default(cuid())
+  nome      String   @unique
+  ordine    Int      @default(0)
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  boxes Box[]
+}
+
+// --- Linea ---
+model Linea {
+  id        String   @id @default(cuid())
+  nome      String   @unique
+  ordine    Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  boxes       Box[]
+  consumi     ConsumoMangime[]
+  trattamenti Trattamento[]
+}
+
+// --- Gruppo Anagrafico ---
+model Gruppo {
+  id        String   @id @default(cuid())
+  nome      String   @unique
+  ordine    Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  boxes       Box[]
+  consumi     ConsumoMangime[]
+  trattamenti Trattamento[]
+}
+
+// --- Box (recinto) ---
+model Box {
+  id             String  @id @default(cuid())
+  numero         Int     @unique
+  tipo           String  @default("DOPPIO") // SINGOLO | DOPPIO
+  superficieMq   Float   @default(0) // superficie utile in m²
+  lunghezzaM     Float? // lunghezza fisica in metri
+  larghezzaM     Float? // larghezza fisica in metri
+  moltiplicatore Int     @default(1) // 1 = singolo, 2 = doppio
+  // Capienza forzata manuale: se valorizzata prevale su quella calcolata dal peso
+  capienzaManuale Int?
+  // Posizione sulla mappa interattiva (coordinate schematiche)
+  posX        Float    @default(0)
+  posY        Float    @default(0)
+  larghezza   Float    @default(140)
+  altezza     Float    @default(26)
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  stalla   Stalla @relation(fields: [stallaId], references: [id], onDelete: Cascade)
+  stallaId String
+  linea    Linea?  @relation(fields: [lineaId], references: [id], onDelete: SetNull)
+  lineaId  String?
+  gruppo   Gruppo? @relation(fields: [gruppoId], references: [id], onDelete: SetNull)
+  gruppoId String?
+  rampa    RampaAlimentazione? @relation(fields: [rampaId], references: [id], onDelete: SetNull)
+  rampaId  String?
+
+  giacenze       Giacenza[]
+  mortalita      Mortalita[]
+  spostamentiDa  SpostamentoBox[]    @relation("spostDa")
+  spostamentiA   SpostamentoBox[]    @relation("spostA")
+  segnalazioni   SegnalazionePasto[]
+  razioni        RazioneBox[]
+  trattamentiBox TrattamentoBox[]
+  venditeBox     VenditaBox[]
+}
+
+// --- Segnalazione pasto dell'operatore (+ / - / 0) per box, per giorno ---
+model SegnalazionePasto {
+  id        String   @id @default(cuid())
+  data      DateTime // normalizzata a mezzanotte
+  segno     String // PIU | MENO | ZERO
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  box   Box    @relation(fields: [boxId], references: [id], onDelete: Cascade)
+  boxId String
+
+  @@unique([boxId, data])
+}
+
+// --- Razione giornaliera per box (% della razione standard) ---
+model RazioneBox {
+  id             String   @id @default(cuid())
+  data           DateTime // normalizzata a mezzanotte
+  percentuale    Float // % della razione teorica standard
+  kgStandardCapo Float    @default(0) // snapshot mangime/capo/gg teorico
+  capi           Int      @default(0) // snapshot capi nel box
+  kgTotale       Float    @default(0) // = percentuale/100 * kgStandardCapo * capi
+  livello        String   @default("BOX") // BOX | LINEA_GRUPPO
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  box       Box      @relation(fields: [boxId], references: [id], onDelete: Cascade)
+  boxId     String
+  partitaId String?
+
+  @@unique([boxId, data])
+}
+
+// --- Allegato PDF della ricetta (condiviso tra più trattamenti) ---
+model AllegatoRicetta {
+  id            String   @id @default(cuid())
+  nome          String
+  numeroRicetta String?
+  dati          Bytes
+  createdAt     DateTime @default(now())
+
+  trattamenti Trattamento[]
+}
+
+// --- Rampa di alimentazione (piano automatico di percentuali) ---
+model RampaAlimentazione {
+  id                    String   @id @default(cuid())
+  nome                  String   @unique
+  incrementoGiornaliero Float    @default(10) // % al giorno (può essere negativo)
+  percentualeMax        Float    @default(100)
+  percentualeMin        Float    @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  boxes Box[]
+}
+
+// --- Trattamento veterinario (da ricetta elettronica) ---
+model Trattamento {
+  id                  String    @id @default(cuid())
+  numeroRicetta       String?
+  dataRicetta         DateTime?
+  farmaco             String
+  aic                 String?
+  viaSomministrazione String? // INTRAMUSCOLARE | ACQUA | MANGIME | ORALE | ALTRO
+  patologia           String?
+  veterinario         String?
+  dataInizio          DateTime
+  durataGiorni        Int       @default(1)
+  dataFine            DateTime // = dataInizio + durataGiorni - 1
+  giorniSospensione   Int       @default(0)
+  dataFineSospensione DateTime? // = dataFine + giorniSospensione
+  quantitaCapi        Int? // n. capi indicati in ricetta
+  note                String?
+  pdfNome             String? // nome del file PDF della ricetta
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  linea      Linea?           @relation(fields: [lineaId], references: [id], onDelete: SetNull)
+  lineaId    String?
+  gruppo     Gruppo?          @relation(fields: [gruppoId], references: [id], onDelete: SetNull)
+  gruppoId   String?
+  allegato   AllegatoRicetta? @relation(fields: [allegatoId], references: [id], onDelete: SetNull)
+  allegatoId String?
+
+  boxes TrattamentoBox[]
+}
+
+// --- Box a cui è applicato un trattamento ---
+model TrattamentoBox {
+  id            String @id @default(cuid())
+  trattamento   Trattamento @relation(fields: [trattamentoId], references: [id], onDelete: Cascade)
+  trattamentoId String
+  box           Box         @relation(fields: [boxId], references: [id], onDelete: Cascade)
+  boxId         String
+
+  @@unique([trattamentoId, boxId])
+}
+
+// --- Partita / ciclo di soccida (una consegna Comazoo) ---
+model Partita {
+  id                 String    @id @default(cuid())
+  codice             String    @unique
+  dataArrivo         DateTime
+  numeroCapiArrivati Int       @default(0)
+  pesoMedioArrivoKg  Float?
+  pesoTotaleArrivoKg Float? // kg di carne ricevuti (per ICA)
+  giorniCiclo        Int? // giorni di accrescimento dall'arrivo (indice tabella)
+  pesoMedioManualeKg Float? // se valorizzato, prevale sul peso teorico da curva
+  mangimeTotaleKg    Float? // mangime totale fornito alla partita (per ICA)
+  // --- Classificazione DOP / filiera ---
+  fornitore   String? // nome fornitore
+  genetica    String? // tipo genetico
+  tatuaggio   String? // tatuaggio di origine (sigla provincia + allevamento)
+  lettera     String? // lettera-mese del tatuaggio (mese di nascita, tab. PDC Parma)
+  venditaMese String? // "YYYY-MM": mese in cui i suini compiono 9 mesi (vendibili DOP)
+  stato              String    @default("ATTIVA") // ATTIVA | CHIUSA
+  dataChiusura       DateTime?
+  note               String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  giacenze    Giacenza[]
+  mortalita   Mortalita[]
+  spostamenti SpostamentoBox[]
+  vendite     VenditaSuini[]
+  ddt         DdtSuini[]
+}
+
+// --- DDT di carico suini (una partita può arrivare con più DDT) ---
+model DdtSuini {
+  id             String    @id @default(cuid())
+  numero         String
+  data           DateTime
+  quantita       Int       @default(0) // suini nel DDT
+  pesoKg         Float? // peso complessivo arrivo DDT
+  modello4Numero String? // Modello 4 (documento sanitario di trasporto)
+  modello4Data   DateTime?
+  atNumero       String? // Attestato di Trasferimento (RIFT, circuito DOP)
+  atData         DateTime?
+  note           String?
+  createdAt      DateTime  @default(now())
+
+  partita   Partita @relation(fields: [partitaId], references: [id], onDelete: Cascade)
+  partitaId String
+}
+
+// --- Giacenza: quanti capi di una partita ci sono in un box (tempo reale) ---
+model Giacenza {
+  id        String   @id @default(cuid())
+  quantita  Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  box       Box     @relation(fields: [boxId], references: [id], onDelete: Cascade)
+  boxId     String
+  partita   Partita @relation(fields: [partitaId], references: [id], onDelete: Cascade)
+  partitaId String
+
+  @@unique([boxId, partitaId])
+}
+
+// --- Spostamento capi tra box ---
+model SpostamentoBox {
+  id        String   @id @default(cuid())
+  data      DateTime
+  quantita  Int
+  note      String?
+  createdAt DateTime @default(now())
+
+  partita   Partita @relation(fields: [partitaId], references: [id], onDelete: Cascade)
+  partitaId String
+  boxDa     Box?    @relation("spostDa", fields: [boxDaId], references: [id], onDelete: SetNull)
+  boxDaId   String?
+  boxA      Box?    @relation("spostA", fields: [boxAId], references: [id], onDelete: SetNull)
+  boxAId    String?
+}
+
+// --- Causali di mortalità (gestibili dall'utente) ---
+model CausaleMortalita {
+  id        String   @id @default(cuid())
+  nome      String   @unique
+  attiva    Boolean  @default(true)
+  ordine    Int      @default(0)
+  createdAt DateTime @default(now())
+
+  mortalita Mortalita[]
+}
+
+// --- Mortalità giornaliera ---
+model Mortalita {
+  id        String   @id @default(cuid())
+  data      DateTime
+  quantita  Int      @default(1)
+  pesoKg    Float?
+  note      String?
+  createdAt DateTime @default(now())
+
+  box        Box               @relation(fields: [boxId], references: [id], onDelete: Cascade)
+  boxId      String
+  partita    Partita?          @relation(fields: [partitaId], references: [id], onDelete: SetNull)
+  partitaId  String?
+  causale    CausaleMortalita? @relation(fields: [causaleId], references: [id], onDelete: SetNull)
+  causaleId  String?
+}
+
+// --- Vendite / uscite di fine ciclo (per ICA e mortalità) ---
+model VenditaSuini {
+  id           String   @id @default(cuid())
+  data         DateTime
+  numeroCapi   Int      @default(0)
+  pesoTotaleKg Float? // kg di carne venduti (per ICA)
+  prezzo       Float?
+  macello      String? // destinazione (per AM)
+  ddtNumero    String? // DDT della consegna al macello
+  dop          Boolean  @default(true) // false = suini distolti dalla DOP
+  note         String?
+  createdAt    DateTime @default(now())
+
+  partita   Partita @relation(fields: [partitaId], references: [id], onDelete: Cascade)
+  partitaId String
+
+  boxes VenditaBox[]
+}
+
+// --- Box da cui sono stati caricati i suini venduti ---
+model VenditaBox {
+  id       String @id @default(cuid())
+  quantita Int
+
+  vendita   VenditaSuini @relation(fields: [venditaId], references: [id], onDelete: Cascade)
+  venditaId String
+  box       Box          @relation(fields: [boxId], references: [id], onDelete: Cascade)
+  boxId     String
+}
+
+// --- Cartellino mangime (PDF archiviato, obbligo conservazione 5 anni) ---
+model AllegatoCartellino {
+  id        String   @id @default(cuid())
+  nome      String
+  dati      Bytes
+  createdAt DateTime @default(now())
+
+  carichi CaricoMangime[]
+}
+
+// --- Anagrafica mangimi (prodotti Comazoo) ---
+model Mangime {
+  id        String   @id @default(cuid())
+  codice    String   @unique
+  nome      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  carichi     CaricoMangime[]
+  consumi     ConsumoMangime[]
+  righeOrdine RigaOrdineMangime[]
+}
+
+// --- Carico mangime (arrivo da Comazoo; può derivare da un DDT) ---
+model CaricoMangime {
+  id          String   @id @default(cuid())
+  data        DateTime
+  numeroLotto String?
+  quantitaKg  Float    @default(0)
+  note        String?
+  createdAt   DateTime @default(now())
+
+  mangime      Mangime             @relation(fields: [mangimeId], references: [id], onDelete: Cascade)
+  mangimeId    String
+  ddt          DdtMangime?         @relation(fields: [ddtId], references: [id], onDelete: Cascade)
+  ddtId        String?
+  cartellino   AllegatoCartellino? @relation(fields: [cartellinoId], references: [id], onDelete: SetNull)
+  cartellinoId String?
+}
+
+// --- Ordine di acquisto mangime (da inviare a Comazoo) ---
+model OrdineMangime {
+  id        String   @id @default(cuid())
+  numero    String   @unique
+  data      DateTime
+  stato     String   @default("BOZZA") // BOZZA | INVIATO | EVASO | ANNULLATO
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  righe RigaOrdineMangime[]
+  ddt   DdtMangime[]
+}
+
+model RigaOrdineMangime {
+  id         String @id @default(cuid())
+  quantitaKg Float  @default(0)
+
+  ordine    OrdineMangime @relation(fields: [ordineId], references: [id], onDelete: Cascade)
+  ordineId  String
+  mangime   Mangime       @relation(fields: [mangimeId], references: [id], onDelete: Cascade)
+  mangimeId String
+}
+
+// --- DDT mangime in entrata (collegato a un ordine) ---
+model DdtMangime {
+  id        String   @id @default(cuid())
+  numero    String
+  data      DateTime
+  note      String?
+  createdAt DateTime @default(now())
+
+  ordine   OrdineMangime? @relation(fields: [ordineId], references: [id], onDelete: SetNull)
+  ordineId String?
+  carichi  CaricoMangime[]
+}
+
+// --- Consumo mangime giornaliero (per Linea + Gruppo) ---
+model ConsumoMangime {
+  id         String   @id @default(cuid())
+  data       DateTime
+  quantitaKg Float    @default(0)
+  note       String?
+  createdAt  DateTime @default(now())
+
+  mangime   Mangime @relation(fields: [mangimeId], references: [id], onDelete: Cascade)
+  mangimeId String
+  linea     Linea?  @relation(fields: [lineaId], references: [id], onDelete: SetNull)
+  lineaId   String?
+  gruppo    Gruppo? @relation(fields: [gruppoId], references: [id], onDelete: SetNull)
+  gruppoId  String?
+}
+
+// --- Curva di accrescimento teorica (dalla tabella standard) ---
+// Indicizzata per giorno di ciclo (giorno 1 = arrivo ~30 kg).
+model CurvaAccrescimento {
+  id            String @id @default(cuid())
+  giorno        Int    @unique
+  pesoKg        Float
+  mangimeCapoGg Float  @default(0) // mangime per capo al giorno
+  mangimeProgKg Float  @default(0) // mangime progressivo per capo
+  resa          Float  @default(0)
+  ica           Float  @default(0)
+}
+
+// =====================================================================
+// MODULO BIOGAS
+// =====================================================================
+
+// Dato giornaliero dal PLC (totalizzatori kWh)
+model BiogasGiorno {
+  id            String   @id @default(cuid())
+  data          DateTime @unique // giorno (mezzanotte)
+  erogatiKWh    Float? // energia prodotta/erogata (PLC "kWh erogati")
+  consumatiKWh  Float? // autoconsumo biologia (PLC "kWh consumati")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Analisi giornaliere dalle sonde del PLC (medie dei campioni ~10 min)
+model BiogasAnalisiGiorno {
+  id           String   @id @default(cuid())
+  data         DateTime @unique
+  ch4Media     Float? // sonda Awite CHP_CH4
+  co2Media     Float? // sonda Awite CHP_CO2
+  o2Media      Float? // sonda Awite ATM_O2
+  h2sMedia     Float? // ppm
+  h2sMax       Float? // picco giornaliero ppm
+  livGasMedia  Float? // livello gasometro %
+  livFMedia    Float? // livello fermentatore (m)
+  livPreMedia  Float? // livello prevasca (m)
+  tempFMedia   Float? // temperatura fermentatore °C
+  tempRicMedia Float? // temperatura ricircolo °C
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// Allarmi del PLC (da DB_Storico*.csv, accoppiati attivo→rientro)
+model BiogasAllarme {
+  id        String    @id @default(cuid())
+  msgNumber Int // codice allarme (tabella PLC_Allarmi)
+  inizio    DateTime
+  fine      DateTime? // null = non rientrato nei log
+  createdAt DateTime  @default(now())
+
+  @@unique([msgNumber, inizio])
+}
+
+// PDF originale del rapporto di manutenzione
+model AllegatoManutenzione {
+  id        String   @id @default(cuid())
+  nome      String
+  dati      Bytes
+  createdAt DateTime @default(now())
+
+  manutenzioni ManutenzioneBiogas[]
+}
+
+// Intervento di manutenzione (es. rapporti ETS sul cogeneratore)
+model ManutenzioneBiogas {
+  id          String   @id @default(cuid())
+  odlNumero   String? // numero ordine di lavoro
+  data        DateTime
+  tipo        String? // M1, M2, M4… o descrizione breve
+  descrizione String? // es. "M2-E0836-LE202-B · Cogeneratore 99 kW"
+  ditta       String? // es. ETS
+  tecnico     String?
+  oreMoto     Int? // ore motore al momento dell'intervento
+  oreLavoro   Float? // ore manodopera (ord.+straord.)
+  oreViaggio  Float?
+  km          Float?
+  commento    String? // commento del tecnico
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  allegato   AllegatoManutenzione? @relation(fields: [allegatoId], references: [id], onDelete: SetNull)
+  allegatoId String?
+  ricambi    RicambioManutenzione[]
+}
+
+// Piani di manutenzione programmata (es. M2 ogni 2.000 ore moto)
+model PianoManutenzione {
+  id            String   @id @default(cuid())
+  tipo          String   @unique // M1, M2, M4…
+  intervalloOre Int // ogni quante ore moto va ripetuto
+  attivo        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Ricambi utilizzati nell'intervento
+model RicambioManutenzione {
+  id          String @id @default(cuid())
+  codice      String
+  descrizione String?
+  quantita    Float  @default(1)
+
+  manutenzione   ManutenzioneBiogas @relation(fields: [manutenzioneId], references: [id], onDelete: Cascade)
+  manutenzioneId String
+}
+
+// Cause di accensione della torcia (gestibili dall'utente)
+model CausaTorcia {
+  id        String   @id @default(cuid())
+  nome      String   @unique
+  ordine    Int      @default(0)
+  attiva    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  attivazioni AttivazioneTorcia[]
+}
+
+// Registro attivazioni della torcia di combustione (obbligo ambientale:
+// il biogas in eccesso va bruciato per ossidare gli inquinanti).
+model AttivazioneTorcia {
+  id        String    @id @default(cuid())
+  inizio    DateTime
+  fine      DateTime? // null = torcia ancora accesa
+  note      String?
+  createdAt DateTime  @default(now())
+
+  causa   CausaTorcia? @relation(fields: [causaId], references: [id], onDelete: SetNull)
+  causaId String?
+}
+
+// Dato mensile dai contatori ufficiali (per autoconsumo totale e motore)
+model BiogasMese {
+  id          String   @id @default(cuid())
+  anno        Int
+  mese        Int // 1-12
+  enProdKWh   Float // energia prodotta (contatore)
+  enCedKWh    Float // energia ceduta in rete (contatore)
+  prezzoEuroKWh Float? // tariffa per la valorizzazione
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([anno, mese])
+}
+
+// --- Curva di densità: m² minimi per capo in base al peso ---
+// pesoMaxKg null = fascia oltre l'ultima soglia (es. oltre 130 kg).
+model CurvaDensita {
+  id        String   @id @default(cuid())
+  pesoMaxKg Float? // limite superiore della fascia (kg); null = oltre
+  mqPerCapo Float // m² per capo richiesti in questa fascia
+  ordine    Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
