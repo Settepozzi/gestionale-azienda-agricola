@@ -1,19 +1,18 @@
 // Schema del database — Gestionale Allevamento
 //
-// SVILUPPO LOCALE: provider "sqlite" (nessuna installazione necessaria).
-// PRODUZIONE (Supabase): cambia provider in "postgresql" e imposta DATABASE_URL
-//   (vedi .env.example). Lo schema è pensato per essere compatibile con entrambi
-//   (nessun enum nativo: gli stati sono stringhe validate nel codice con zod).
+// Database: Postgres su Supabase (sia sviluppo che produzione).
+// DATABASE_URL = transaction pooler (porta 6543, per l'app/serverless),
+// DIRECT_URL = session pooler (porta 5432, per prisma db push). Vedi .env.example.
+// Nessun enum nativo: gli stati sono stringhe validate nel codice con zod.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
-  // Per Supabase/Postgres aggiungi anche:
-  // directUrl = env("DIRECT_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // --- Utenti / accesso ---
