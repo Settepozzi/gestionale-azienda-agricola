@@ -74,6 +74,7 @@ export default function Sidebar({
         items: [
           { href: "/biogas", label: "Dashboard", icon: "🏠" },
           { href: "/biogas/analisi", label: "Analisi e sonde", icon: "🧪" },
+          { href: "/biogas/digestato", label: "Analisi digestato", icon: "🔬" },
           { href: "/biogas/dati", label: "Dati e import PLC", icon: "📥" },
           { href: "/biogas/allarmi", label: "Registro allarmi", icon: "🚨" },
           { href: "/biogas/manutenzioni", label: "Manutenzioni", icon: "🔧" },

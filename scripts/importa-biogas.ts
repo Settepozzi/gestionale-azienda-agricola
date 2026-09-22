@@ -1,10 +1,15 @@
-// Importa i log del PLC nel database:
+// Importa in blocco i log del PLC nel database (anche migliaia di file):
 //  - DB_kWh_Erogati*/DB_kWh_Consumati*  → BiogasGiorno (un valore per giorno)
 //  - DB_CH4*/CO2*/O2*/H2S*/Gas*/Livelli*/Temp* → BiogasAnalisiGiorno (medie giornaliere)
+//  - DB_Storico* → BiogasAllarme (eventi accoppiati attivo→rientro)
+//
+// La cartella viene scansionata RICORSIVAMENTE (sottocartelle incluse).
+// L'import è idempotente: rilanciare sugli stessi file (o su file che si
+// sovrappongono) non crea duplicati.
 //
 // Uso:  npx tsx scripts/importa-biogas.ts "C:\percorso\cartella-csv"
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { PrismaClient } from "@prisma/client";
 import {
@@ -21,6 +26,26 @@ import {
 
 const prisma = new PrismaClient();
 
+// Scansione ricorsiva della cartella
+function trovaCsv(dir: string): string[] {
+  const out: string[] = [];
+  for (const nome of readdirSync(dir)) {
+    const p = join(dir, nome);
+    try {
+      const st = statSync(p);
+      if (st.isDirectory()) out.push(...trovaCsv(p));
+      else if (/\.csv$/i.test(nome)) out.push(p);
+    } catch {
+      // file non leggibile: lo segnaliamo dopo
+    }
+  }
+  return out;
+}
+
+function nomeFile(p: string): string {
+  return p.split(/[\\/]/).pop() ?? p;
+}
+
 async function main() {
   const dir = process.argv[2];
   if (!dir) {
@@ -28,18 +53,56 @@ async function main() {
     process.exit(1);
   }
 
-  const tutti = readdirSync(dir);
-  const filesKwh = tutti.filter((f) => /^DB_kWh_(Erogati|Consumati)/i.test(f));
-  const filesAnalisi = tutti.filter((f) => /^DB_(CH4|CO2|O2|H2S|Gas|Livelli|Temp)/i.test(f));
-  const filesStorico = tutti.filter((f) => /^DB_Storico/i.test(f));
+  console.log(`🔍 Scansione ricorsiva di: ${dir}`);
+  const tuttiCsv = trovaCsv(dir);
+  console.log(`   Trovati ${tuttiCsv.length} file .csv\n`);
 
-  // --- kWh ---
   const acc = nuovoAccumulatore();
-  for (const f of filesKwh) {
-    const n = parseCsvPlc(readFileSync(join(dir, f), "latin1"), acc);
-    console.log(`✔ ${f}: ${n} campioni kWh`);
+  const accA = nuovoAccumulatoreAnalisi();
+  const eventi: EventoAllarme[] = [];
+
+  let nKwh = 0,
+    nAnalisi = 0,
+    nStorico = 0;
+  const ignorati: string[] = [];
+  const falliti: string[] = [];
+  let processati = 0;
+
+  for (const percorso of tuttiCsv) {
+    const f = nomeFile(percorso);
+    processati++;
+    try {
+      const testo = readFileSync(percorso, "latin1");
+      if (/^DB_kWh_(Erogati|Consumati)/i.test(f)) {
+        nKwh += parseCsvPlc(testo, acc);
+      } else if (/^DB_Storico/i.test(f)) {
+        nStorico += parseCsvStorico(testo, eventi);
+      } else if (/^DB_(CH4|CO2|O2|H2S|Gas|Livelli|Temp)/i.test(f)) {
+        nAnalisi += parseCsvAnalisi(testo, accA);
+      } else {
+        ignorati.push(f);
+      }
+    } catch {
+      falliti.push(f);
+    }
+    if (processati % 100 === 0 || processati === tuttiCsv.length) {
+      console.log(`   … letti ${processati}/${tuttiCsv.length} file`);
+    }
   }
-  const giorni = risultatiGiornalieri(acc).filter((g) => g.data >= "2024-01-01");
+
+  console.log(`\n📖 Campioni letti — kWh: ${nKwh} · sonde: ${nAnalisi} · allarmi: ${nStorico}`);
+  if (ignorati.length > 0) {
+    const gruppi = [...new Set(ignorati.map((f) => f.replace(/\d+\.csv$/i, "*")))];
+    console.log(`⚠ ${ignorati.length} file ignorati (nome non riconosciuto): ${gruppi.slice(0, 10).join(", ")}`);
+  }
+  if (falliti.length > 0) {
+    console.log(`⚠ ${falliti.length} file NON leggibili: ${falliti.slice(0, 10).join(", ")}`);
+  }
+
+  // --- Scrittura kWh ---
+  const giorni = risultatiGiornalieri(acc).filter((g) => g.data >= "2017-01-01");
+  console.log(`\n💾 Scrittura kWh: ${giorni.length} giorni…`);
+  let scritti = 0;
   for (const g of giorni) {
     const data = new Date(`${g.data}T00:00:00`);
     await prisma.biogasGiorno.upsert({
@@ -50,18 +113,13 @@ async function main() {
         ...(g.consumatiKWh != null ? { consumatiKWh: g.consumatiKWh } : {}),
       },
     });
+    if (++scritti % 500 === 0) console.log(`   … ${scritti}/${giorni.length}`);
   }
-  console.log(`✅ kWh: ${giorni.length} giorni.`);
 
-  // --- Analisi sonde ---
-  const accA = nuovoAccumulatoreAnalisi();
-  let campioni = 0;
-  for (const f of filesAnalisi) {
-    const n = parseCsvAnalisi(readFileSync(join(dir, f), "latin1"), accA);
-    campioni += n;
-    if (n > 0) console.log(`✔ ${f}: ${n} campioni sonde`);
-  }
-  const analisi = risultatiAnalisi(accA);
+  // --- Scrittura analisi sonde ---
+  const analisi = risultatiAnalisi(accA).filter((a) => a.data >= "2017-01-01");
+  console.log(`💾 Scrittura analisi sonde: ${analisi.length} giorni…`);
+  scritti = 0;
   for (const a of analisi) {
     const data = new Date(`${a.data}T00:00:00`);
     const m = a.medie;
@@ -93,16 +151,13 @@ async function main() {
         ...(m.tempRic != null ? { tempRicMedia: m.tempRic } : {}),
       },
     });
+    if (++scritti % 500 === 0) console.log(`   … ${scritti}/${analisi.length}`);
   }
-  console.log(`✅ Analisi sonde: ${campioni} campioni → ${analisi.length} giorni.`);
 
-  // --- Allarmi (DB_Storico) ---
-  const eventi: EventoAllarme[] = [];
-  for (const f of filesStorico) {
-    const n = parseCsvStorico(readFileSync(join(dir, f), "latin1"), eventi);
-    console.log(`✔ ${f}: ${n} eventi allarme`);
-  }
+  // --- Scrittura allarmi ---
   const allarmi = accoppiaAllarmi(eventi);
+  console.log(`💾 Scrittura allarmi: ${allarmi.length}…`);
+  scritti = 0;
   for (const a of allarmi) {
     const inizio = new Date(a.inizio);
     await prisma.biogasAllarme.upsert({
@@ -110,8 +165,26 @@ async function main() {
       create: { msgNumber: a.msgNumber, inizio, fine: a.fine ? new Date(a.fine) : null },
       update: { fine: a.fine ? new Date(a.fine) : null },
     });
+    if (++scritti % 500 === 0) console.log(`   … ${scritti}/${allarmi.length}`);
   }
-  console.log(`✅ Allarmi: ${eventi.length} eventi → ${allarmi.length} allarmi accoppiati.`);
+
+  // --- Riepilogo finale ---
+  const [totG, totA, totAl] = await Promise.all([
+    prisma.biogasGiorno.count(),
+    prisma.biogasAnalisiGiorno.count(),
+    prisma.biogasAllarme.count(),
+  ]);
+  const [primoG, ultimoG] = await Promise.all([
+    prisma.biogasGiorno.findFirst({ orderBy: { data: "asc" } }),
+    prisma.biogasGiorno.findFirst({ orderBy: { data: "desc" } }),
+  ]);
+  const fmt = (d?: Date | null) => (d ? d.toISOString().slice(0, 10) : "-");
+
+  console.log("\n════════ RIEPILOGO ════════");
+  console.log(`File letti: ${tuttiCsv.length} (ignorati: ${ignorati.length}, falliti: ${falliti.length})`);
+  console.log(`Questo import — kWh: ${giorni.length} gg · sonde: ${analisi.length} gg · allarmi: ${allarmi.length}`);
+  console.log(`ORA NEL DATABASE — produzione: ${totG} gg (${fmt(primoG?.data)} → ${fmt(ultimoG?.data)}) · analisi: ${totA} gg · allarmi: ${totAl}`);
+  console.log("═══════════════════════════");
 }
 
 main()

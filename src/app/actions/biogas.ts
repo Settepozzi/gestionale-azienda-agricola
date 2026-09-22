@@ -46,7 +46,7 @@ export async function importaCsvPlc(
     };
   }
 
-  const giorni = risultatiGiornalieri(acc).filter((g) => g.data >= "2024-01-01");
+  const giorni = risultatiGiornalieri(acc).filter((g) => g.data >= "2017-01-01");
   for (const g of giorni) {
     const data = new Date(`${g.data}T00:00:00`);
     await prisma.biogasGiorno.upsert({

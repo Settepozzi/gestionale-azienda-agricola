@@ -674,6 +674,39 @@ model AttivazioneTorcia {
   causaId String?
 }
 
+// Analisi di laboratorio del digestato (referti ISF/Schaumann "Rapporto Biogas")
+model AnalisiDigestato {
+  id             String   @id @default(cuid())
+  data           DateTime // data campionamento
+  luogo          String   @default("F1") // punto di campionamento (fermentatore)
+  rapportoNumero String?  @unique // es. 26-82183-BG-1
+  laboratorio    String?
+  ph             Float?
+  ce             Float? // conducibilità elettrica mS/cm
+  agv            Float? // acidi grassi volatili (FOS) g HAceq/l
+  tac            Float? // alcalinità g CaCO3/l
+  fosTac         Float? // rapporto AGV/TAC (stabile se < 0,30)
+  nh4            Float? // azoto ammoniacale g/l
+  ss             Float? // sostanza secca g/kg
+  sso            Float? // sostanza secca organica g/kg
+  cenere         Float? // g/kg SS
+  acAcetico      Float? // mg/l (i "<soglia" restano vuoti)
+  acPropionico   Float?
+  acButirrico    Float?
+  acIsoButirrico Float?
+  acValerianico  Float?
+  acIsoValerianico Float?
+  acCaproico     Float?
+  hacEq          Float? // equivalente acido acetico mg HAceq/l
+  note           String?
+  pdfNome        String?
+  pdfDati        Bytes? // referto originale
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([data, luogo])
+}
+
 // Dato mensile dai contatori ufficiali (per autoconsumo totale e motore)
 model BiogasMese {
   id          String   @id @default(cuid())

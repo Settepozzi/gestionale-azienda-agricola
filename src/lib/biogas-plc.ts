@@ -37,9 +37,10 @@ export function parseCsvPlc(
   let righe = 0;
   for (const line of testo.split(/\r?\n/)) {
     if (!line || line.startsWith('"VarName"')) continue;
-    // "Var";"14.04.2025 11:54:58";68;1;457614...
+    // Formato nuovo: "Var";"14.04.2025 11:54:58";68;1;…
+    // Formato storico (pre ~2023): "Var";"14/12/2020 1.14.48";123;1;…
     const m = line.match(
-      /^"([^"]+)";"(\d{2})\.(\d{2})\.(\d{4}) (\d{2}):(\d{2}):(\d{2})";([\d.,\-]+);/
+      /^"([^"]+)";"(\d{2})[.\/](\d{2})[.\/](\d{4}) (\d{1,2})[:.](\d{2})[:.](\d{2})";([\d.,\-]+);/
     );
     if (!m) continue;
     const varName = m[1].toLowerCase();
@@ -127,19 +128,19 @@ export function nuovoAccumulatoreAnalisi(): AccAnalisi {
 }
 
 // Analizza un CSV delle sonde e accumula somme/conteggi per giorno.
-// Scarta le righe con orologio PLC sballato (date < 2024).
+// Scarta le righe con orologio PLC sballato (date < 2017: l'impianto parte dal 2017).
 export function parseCsvAnalisi(testo: string, acc: AccAnalisi): number {
   let righe = 0;
   for (const line of testo.split(/\r?\n/)) {
     if (!line || line.startsWith('"VarName"')) continue;
     const m = line.match(
-      /^"([^"]+)";"(\d{2})\.(\d{2})\.(\d{4}) \d{2}:\d{2}:\d{2}";(-?[\d.,]+);/
+      /^"([^"]+)";"(\d{2})[.\/](\d{2})[.\/](\d{4}) \d{1,2}[:.]\d{2}[:.]\d{2}";(-?[\d.,]+);/
     );
     if (!m) continue;
     const campo = campoDaVarName(m[1]);
     if (!campo) continue;
     const anno = Number(m[4]);
-    if (anno < 2024) continue; // orologio PLC sballato
+    if (anno < 2017) continue; // orologio PLC sballato
     const valore = Number(m[5].replace(",", "."));
     if (isNaN(valore)) continue;
 
@@ -175,10 +176,10 @@ export function parseCsvStorico(testo: string, eventi: EventoAllarme[]): number 
     const stato = Number(campi[2]);
     const msgNumber = Number(campi[4]);
     if ((stato !== 0 && stato !== 1) || isNaN(msgNumber) || msgNumber <= 0) continue;
-    const m = campi[13]?.match(/"(\d{2})\.(\d{2})\.(\d{4}) (\d{2}):(\d{2}):(\d{2})"/);
+    const m = campi[13]?.match(/"(\d{2})[.\/](\d{2})[.\/](\d{4}) (\d{1,2})[:.](\d{2})[:.](\d{2})"/);
     if (!m) continue;
     const anno = Number(m[3]);
-    if (anno < 2024) continue; // orologio PLC sballato
+    if (anno < 2017) continue; // orologio PLC sballato
     const ts = new Date(
       anno,
       Number(m[2]) - 1,

@@ -36,6 +36,10 @@ async function getTokenInfo(token: string | undefined): Promise<TokenInfo | null
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  // Battito del cron Vercel (tiene sveglio Supabase): sempre libero, nessun dato
+  if (pathname === "/api/keepalive") return NextResponse.next();
+
   const token = req.cookies.get(COOKIE_NAME)?.value;
   const info = await getTokenInfo(token);
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
