@@ -13,13 +13,18 @@ const NUMERICI = [
   "ph", "ce", "agv", "tac", "fosTac", "nh4", "ss", "sso", "cenere",
   "acAcetico", "acPropionico", "acButirrico", "acIsoButirrico",
   "acValerianico", "acIsoValerianico", "acCaproico", "hacEq",
+  "ssPct", "ssoPctSS", "azotoPctSS", "fosforoPctSS",
 ] as const;
+
+const TIPI = ["PROCESSO", "AGRONOMICA", "IGIENE"] as const;
 
 const schema = z.object({
   data: z.string().min(1, "La data di campionamento è obbligatoria"),
   luogo: z.string().trim().min(1, "Il punto di campionamento è obbligatorio"),
+  tipo: z.enum(TIPI).default("PROCESSO"),
   rapportoNumero: z.string().trim().optional(),
   laboratorio: z.string().trim().optional(),
+  salmonella: z.string().trim().optional(),
   note: z.string().trim().optional(),
   ...Object.fromEntries(NUMERICI.map((k) => [k, optionalNumber()])),
 });
@@ -32,13 +37,15 @@ export async function createAnalisi(
   const parsed = schema.safeParse({
     data: formData.get("data"),
     luogo: formData.get("luogo") || "F1",
+    tipo: formData.get("tipo") || "PROCESSO",
     rapportoNumero: formData.get("rapportoNumero") || undefined,
     laboratorio: formData.get("laboratorio") || undefined,
+    salmonella: formData.get("salmonella") || undefined,
     note: formData.get("note") || undefined,
     ...Object.fromEntries(NUMERICI.map((k) => [k, formData.get(k) || ""])),
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dati non validi" };
-  const d = parsed.data as Record<string, unknown> & { data: string; luogo: string };
+  const d = parsed.data as Record<string, unknown> & { data: string; luogo: string; tipo: string };
 
   const data = new Date(`${d.data}T00:00:00`);
 
@@ -55,21 +62,23 @@ export async function createAnalisi(
   const doppio = await prisma.analisiDigestato.findFirst({
     where: {
       OR: [
-        { data, luogo: d.luogo },
+        { data, luogo: d.luogo, tipo: d.tipo },
         ...(d.rapportoNumero ? [{ rapportoNumero: d.rapportoNumero as string }] : []),
       ],
     },
   });
   if (doppio) {
-    return { error: "Esiste già un'analisi con questa data/luogo (o numero rapporto)." };
+    return { error: "Esiste già un'analisi di questo tipo con questa data/luogo (o numero rapporto)." };
   }
 
   await prisma.analisiDigestato.create({
     data: {
       data,
       luogo: d.luogo,
+      tipo: d.tipo,
       rapportoNumero: (d.rapportoNumero as string) || null,
       laboratorio: (d.laboratorio as string) || null,
+      salmonella: (d.salmonella as string) || null,
       note: (d.note as string) || null,
       pdfNome,
       pdfDati,

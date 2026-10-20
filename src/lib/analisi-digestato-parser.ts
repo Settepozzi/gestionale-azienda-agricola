@@ -3,10 +3,17 @@
 // a COPPIE — due righe di sigle consecutive, poi le due righe di valori.
 
 export type AnalisiEstratta = {
+  tipo?: "PROCESSO" | "AGRONOMICA" | "IGIENE";
   rapportoNumero?: string;
   data?: string; // yyyy-mm-dd (campionamento)
   luogo?: string; // es. F1
   laboratorio?: string;
+  // agronomica / igiene (Eurofins)
+  ssPct?: number;
+  ssoPctSS?: number;
+  azotoPctSS?: number;
+  fosforoPctSS?: number;
+  salmonella?: string;
   ph?: number;
   ce?: number;
   agv?: number;
@@ -48,10 +55,62 @@ function leggiValore(riga: string): { valore: number | null; ok: boolean } {
   return { valore: Number(m[1].replace(",", ".")), ok: true };
 }
 
+// --- Referti Eurofins Lab-Control (agronomica / igiene) -------------------
+// Layout pdf-parse: il VALORE sta sulla riga precedente a quella che inizia
+// col nome del parametro (es. "4,0" poi "Sostanza Secca (residuo…)± 0,6").
+const MESI_ITA: Record<string, string> = {
+  gen: "01", feb: "02", mar: "03", apr: "04", mag: "05", giu: "06",
+  lug: "07", ago: "08", set: "09", ott: "10", nov: "11", dic: "12",
+};
+
+function parseEurofins(righe: string[], testo: string): AnalisiEstratta {
+  const out: AnalisiEstratta = { laboratorio: "Eurofins Lab-Control" };
+
+  const rapporto = testo.match(/R(\d{9,12})/);
+  if (rapporto) out.rapportoNumero = `R${rapporto[1]}`;
+
+  // Data: prelievo se presente, altrimenti ricevimento ("18-set-26")
+  const dataRic = testo.match(/Data ricev\.?:?\s*\n?\s*(\d{1,2})-([a-z]{3})-(\d{2})\b/i);
+  if (dataRic && MESI_ITA[dataRic[2].toLowerCase()]) {
+    out.data = `20${dataRic[3]}-${MESI_ITA[dataRic[2].toLowerCase()]}-${dataRic[1].padStart(2, "0")}`;
+  }
+
+  const valorePrima = (nomeRe: RegExp): number | undefined => {
+    for (let i = 1; i < righe.length; i++) {
+      if (!nomeRe.test(righe[i])) continue;
+      const m = righe[i - 1].match(/^(\d+(?:[.,]\d+)?)$/);
+      if (m) return Number(m[1].replace(",", "."));
+    }
+    return undefined;
+  };
+
+  out.ssPct = valorePrima(/^Sostanza Secca \(residuo/i);
+  out.ssoPctSS = valorePrima(/^Sostanza organica secca/i);
+  out.fosforoPctSS = valorePrima(/^Fosforo±|^Fosforo\b/);
+  out.azotoPctSS = valorePrima(/^Azoto±|^Azoto\b/);
+
+  // Igiene: Salmonella su N unità campionarie
+  const unita = (testo.match(/UNITA' CAMPIONARIA \d+/g) ?? []).length;
+  const assenti = (testo.match(/^assente$/gm) ?? []).length;
+  if (/Salmonella/i.test(testo) && unita > 0) {
+    out.salmonella =
+      assenti >= unita ? `assente (${unita}/${unita} unità campionarie)` : `presente! (${assenti}/${unita} assenti)`;
+    out.tipo = out.azotoPctSS == null && out.fosforoPctSS == null ? "IGIENE" : "AGRONOMICA";
+  } else {
+    out.tipo = "AGRONOMICA";
+  }
+
+  return out;
+}
+
 export function parseAnalisiDigestatoText(raw: string): AnalisiEstratta {
   const righe = raw.replace(/\r/g, "").split("\n").map((l) => l.trim()).filter(Boolean);
   const testo = righe.join("\n");
-  const out: AnalisiEstratta = {};
+
+  // Referto Eurofins? (agronomica/igiene) — altrimenti ISF (processo)
+  if (/Eurofins Lab-Control/i.test(testo)) return parseEurofins(righe, testo);
+
+  const out: AnalisiEstratta = { tipo: "PROCESSO" };
 
   const rapporto = testo.match(/(\d{2}-\d{3,7}-BG-\d+)/);
   if (rapporto) out.rapportoNumero = rapporto[1];

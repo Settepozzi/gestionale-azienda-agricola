@@ -650,6 +650,35 @@ model RicambioManutenzione {
   manutenzioneId String
 }
 
+// Analisi delle acque sotterranee dei pozzi piezometrici (monitoraggio
+// ambientale obbligatorio; limiti CSC Tab.2 All.5 D.Lgs 152/2006)
+model AnalisiAcquaPiezometro {
+  id                   String   @id @default(cuid())
+  data                 DateTime // data campionamento
+  punto                String // "Nord" | "Sud" | altro piezometro
+  rapportoNumero       String?  @unique // es. AF 260930-09
+  laboratorio          String?
+  livelloFreatimetricoM Float? // metri (negativo = sotto piano campagna)
+  temperaturaC         Float?
+  aspetto              String?
+  ph                   Float?
+  conducibilita        Float? // µS/cm a 20°C
+  cod                  Float? // mg/L O2
+  azotoAmmoniacale     Float? // mg/L N
+  nitriti              Float? // mg/L NO2 (CSC 0,5)
+  nitrati              Float? // mg/L NO3
+  fosforo              Float? // mg/L P
+  rame                 Float? // µg/L (CSC 1000)
+  zinco                Float? // µg/L (CSC 3000)
+  note                 String?
+  pdfNome              String?
+  pdfDati              Bytes?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([data, punto])
+}
+
 // Cause di accensione della torcia (gestibili dall'utente)
 model CausaTorcia {
   id        String   @id @default(cuid())
@@ -674,12 +703,14 @@ model AttivazioneTorcia {
   causaId String?
 }
 
-// Analisi di laboratorio del digestato (referti ISF/Schaumann "Rapporto Biogas")
+// Analisi di laboratorio del digestato: referti ISF/Schaumann "Rapporto Biogas"
+// (tipo PROCESSO) ed Eurofins (tipo AGRONOMICA / IGIENE)
 model AnalisiDigestato {
   id             String   @id @default(cuid())
-  data           DateTime // data campionamento
+  data           DateTime // data campionamento (o ricevimento se assente)
   luogo          String   @default("F1") // punto di campionamento (fermentatore)
-  rapportoNumero String?  @unique // es. 26-82183-BG-1
+  tipo           String   @default("PROCESSO") // PROCESSO | AGRONOMICA | IGIENE
+  rapportoNumero String?  @unique // es. 26-82183-BG-1, R202622261
   laboratorio    String?
   ph             Float?
   ce             Float? // conducibilità elettrica mS/cm
@@ -698,13 +729,64 @@ model AnalisiDigestato {
   acIsoValerianico Float?
   acCaproico     Float?
   hacEq          Float? // equivalente acido acetico mg HAceq/l
+  // --- Caratterizzazione agronomica / igiene (referti Eurofins) ---
+  ssPct          Float? // sostanza secca %
+  ssoPctSS       Float? // sostanza organica % s.s.
+  azotoPctSS     Float? // azoto % s.s.
+  fosforoPctSS   Float? // fosforo % s.s.
+  salmonella     String? // es. "assente (5/5 unità campionarie)"
   note           String?
   pdfNome        String?
   pdfDati        Bytes? // referto originale
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  @@unique([data, luogo])
+  @@unique([data, luogo, tipo])
+}
+
+// Analisi dell'olio motore del cogeneratore (report laboratorio lubrificanti)
+model AnalisiOlio {
+  id            String   @id @default(cuid())
+  data          DateTime @unique // data campionamento
+  labNumero     String? // es. Z-260045733 (report di provenienza)
+  motore        String? // es. MAN E0836 LE302
+  olio          String? // es. Petronas GEO BLG SAE 40
+  oreOlio       Int? // ore del lubrificante
+  oreMotore     Int? // ore motore al prelievo (unit time)
+  cambioOlio    Boolean  @default(false)
+  litriRabbocco Float?
+  // metalli (ppm)
+  ferro      Float?
+  cromo      Float?
+  nichel     Float?
+  alluminio  Float?
+  rame       Float?
+  piombo     Float?
+  stagno     Float?
+  silicio    Float?
+  sodio      Float?
+  potassio   Float?
+  magnesio   Float?
+  calcio     Float?
+  fosforo    Float?
+  zinco      Float?
+  // proprietà del fluido
+  visc40     Float? // cSt a 40°C
+  visc100    Float? // cSt a 100°C
+  viscIndex  Float?
+  tan        Float? // acid number mg KOH/g
+  bnD4739    Float?
+  bnD2896    Float?
+  iPh        Float?
+  oxidation  Float? // abs/cm
+  nitration  Float? // abs/0.1mm
+  zolfoPct   Float?
+  commento   String?
+  note       String?
+  pdfNome    String?
+  pdfDati    Bytes?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 // Dato mensile dai contatori ufficiali (per autoconsumo totale e motore)

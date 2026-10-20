@@ -15,17 +15,21 @@ const C2 = "#1baf7a";
 const SOGLIA_FOSTAC = 0.3; // sotto = biologia stabile (standard del referto)
 
 export default async function DigestatoPage() {
-  const analisi = await prisma.analisiDigestato.findMany({
+  const tutte = await prisma.analisiDigestato.findMany({
     orderBy: { data: "asc" },
     select: {
-      id: true, data: true, luogo: true, rapportoNumero: true, laboratorio: true,
+      id: true, data: true, luogo: true, tipo: true, rapportoNumero: true, laboratorio: true,
       ph: true, ce: true, agv: true, tac: true, fosTac: true, nh4: true,
       ss: true, sso: true, cenere: true, acAcetico: true, acPropionico: true,
       acButirrico: true, acIsoButirrico: true, acValerianico: true,
-      acIsoValerianico: true, acCaproico: true, hacEq: true, note: true,
+      acIsoValerianico: true, acCaproico: true, hacEq: true,
+      ssPct: true, ssoPctSS: true, azotoPctSS: true, fosforoPctSS: true,
+      salmonella: true, note: true,
       pdfNome: true, // niente pdfDati: i bytes restano fuori dalla lista
     },
   });
+  const analisi = tutte.filter((a) => a.tipo === "PROCESSO");
+  const altre = tutte.filter((a) => a.tipo !== "PROCESSO");
   const ultima = analisi[analisi.length - 1];
 
   const serie = (
@@ -215,6 +219,75 @@ export default async function DigestatoPage() {
             </p>
           </div>
         </>
+      )}
+
+      {/* Caratterizzazione agronomica e igiene (Eurofins) */}
+      {altre.length > 0 && (
+        <div className="card mt-6 overflow-x-auto">
+          <h3 className="px-4 pt-4 font-semibold text-slate-800">
+            🌱 Caratterizzazione agronomica e igiene
+          </h3>
+          <p className="px-4 pt-1 text-xs text-slate-500">
+            Referti per l&apos;uso agronomico del digestato (azoto, fosforo) e controlli igienici.
+          </p>
+          <table className="w-full text-sm">
+            <thead className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+              <tr>
+                <th className="px-3 py-3">Data</th>
+                <th className="px-3 py-3">Tipo</th>
+                <th className="px-3 py-3 text-right">SS %</th>
+                <th className="px-3 py-3 text-right">SSo % s.s.</th>
+                <th className="px-3 py-3 text-right">Azoto % s.s.</th>
+                <th className="px-3 py-3 text-right">Fosforo % s.s.</th>
+                <th className="px-3 py-3">Salmonella</th>
+                <th className="px-3 py-3 text-right">Azioni</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {[...altre].reverse().map((a) => (
+                <tr key={a.id} className="hover:bg-slate-50">
+                  <td className="px-3 py-2.5 font-medium text-slate-700">{formatDate(a.data)}</td>
+                  <td className="px-3 py-2.5">
+                    <span
+                      className={`badge ${
+                        a.tipo === "IGIENE" ? "bg-violet-100 text-violet-800" : "bg-green-100 text-green-800"
+                      }`}
+                    >
+                      {a.tipo === "IGIENE" ? "Igiene" : "Agronomica"}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5 text-right">{fmtOpz(a.ssPct, 1)}</td>
+                  <td className="px-3 py-2.5 text-right">{fmtOpz(a.ssoPctSS, 0)}</td>
+                  <td className="px-3 py-2.5 text-right font-medium">{fmtOpz(a.azotoPctSS, 1)}</td>
+                  <td className="px-3 py-2.5 text-right font-medium">{fmtOpz(a.fosforoPctSS, 1)}</td>
+                  <td className="px-3 py-2.5">
+                    {a.salmonella ? (
+                      <span className={a.salmonella.startsWith("assente") ? "text-green-700" : "font-bold text-red-600"}>
+                        {a.salmonella}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center justify-end gap-3">
+                      {a.pdfNome && (
+                        <a
+                          href={`/api/analisi-digestato/pdf/${a.id}`}
+                          target="_blank"
+                          className="text-sm font-medium text-brand-600 hover:text-brand-800"
+                        >
+                          PDF
+                        </a>
+                      )}
+                      <DeleteButton action={deleteAnalisi} id={a.id} />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

@@ -35,6 +35,10 @@ const CAMPI: { name: string; label: string; step?: string }[] = [
   { name: "acIsoValerianico", label: "Ac. iso-valerianico (mg/l)", step: "1" },
   { name: "acCaproico", label: "Ac. caproico (mg/l)", step: "1" },
   { name: "hacEq", label: "HAc-EQ (mg HAceq/l)", step: "0.1" },
+  { name: "ssPct", label: "SS agronomica (%)", step: "0.1" },
+  { name: "ssoPctSS", label: "SSo (% s.s.)", step: "0.1" },
+  { name: "azotoPctSS", label: "Azoto (% s.s.)", step: "0.1" },
+  { name: "fosforoPctSS", label: "Fosforo (% s.s.)", step: "0.1" },
 ];
 
 export default function NuovaAnalisiClient() {
@@ -125,6 +129,28 @@ export default function NuovaAnalisiClient() {
               Laboratorio
             </label>
             <input id="an-lab" name="laboratorio" className="input" defaultValue={dati?.laboratorio ?? ""} />
+          </div>
+          <div>
+            <label className="label" htmlFor="an-tipo">
+              Tipo analisi *
+            </label>
+            <select id="an-tipo" name="tipo" className="input" defaultValue={dati?.tipo ?? "PROCESSO"}>
+              <option value="PROCESSO">Processo (ISF: pH, FOS/TAC…)</option>
+              <option value="AGRONOMICA">Agronomica (N, P, SS)</option>
+              <option value="IGIENE">Igiene (Salmonella)</option>
+            </select>
+          </div>
+          <div>
+            <label className="label" htmlFor="an-salmonella">
+              Salmonella
+            </label>
+            <input
+              id="an-salmonella"
+              name="salmonella"
+              className="input"
+              placeholder="es. assente (5/5)"
+              defaultValue={dati?.salmonella ?? ""}
+            />
           </div>
         </div>
 
